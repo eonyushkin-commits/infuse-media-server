@@ -6,7 +6,7 @@ services:
     depends_on:
       - parser
     ports:
-      - "${WEBDAV_PORT:-8080}:8080"
+      - "${WEBDAV_PORT}:8080"
     volumes:
       - ./strm_library:/media
     environment:
@@ -27,6 +27,8 @@ services:
     build: .
     container_name: strm-parser
     restart: unless-stopped
+    depends_on:
+      - torrserver
     volumes:
       - ./:/app
     environment:
