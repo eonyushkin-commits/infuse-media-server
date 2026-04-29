@@ -1,20 +1,18 @@
 services:
   webdav:
-    image: ghcr.io/hacdias/webdav:latest
+    image: ionelmc/webdav
     container_name: webdav-infuse
     restart: unless-stopped
-    user: "1000:1000"
+    depends_on:
+      - parser
     ports:
-      - "${WEBDAV_PORT}:6065"
+      - "${WEBDAV_PORT:-8080}:8080"
     volumes:
-      - ./strm_library:/media:ro
-      - ./webdav-config.yml:/config.yml.tpl:ro
+      - ./strm_library:/media
     environment:
-      - WEBDAV_USER=${WEBDAV_USER}
+      - WEBDAV_USERNAME=${WEBDAV_USER}
       - WEBDAV_PASSWORD=${WEBDAV_PASSWORD}
-    entrypoint: >
-      sh -c "envsubst < /config.yml.tpl > /tmp/config.yml &&
-            webdav --config /tmp/config.yml"
+      - UID=1000
 
   torrserver:
     image: ghcr.io/yourok/torrserver:latest
