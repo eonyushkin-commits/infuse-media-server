@@ -16,7 +16,7 @@ readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
 readonly INSTALL_DIR="/opt/infuse-media-server"
-readonly REPO_URL="https://github.com/ВАШ_ЛОГИН/torrserver-infuse-webdav.git" # <--- УКАЖИТЕ СВОЙ РЕПОЗИТОРИЙ
+readonly REPO_URL="https://github.com/eonyushkin-commits/infuse-media-server.git"
 
 # ==============================================================================
 # ФУНКЦИИ ЛОГИРОВАНИЯ
