@@ -12,7 +12,7 @@ services:
     environment:
       - WEBDAV_USERNAME=${WEBDAV_USER}
       - WEBDAV_PASSWORD=${WEBDAV_PASSWORD}
-      - UID=1000
+      - UID=0
 
   torrserver:
     image: ghcr.io/yourok/torrserver:latest
