@@ -1,0 +1,181 @@
+import os
+import requests
+import re
+import urllib.parse
+import time
+import sys
+
+
+# ================= НАСТРОЙКИ (берутся из .env или системных) =================
+TORR_PORT = os.getenv("TORR_PORT", "8090")
+
+# Внутренний URL для API-запросов внутри Docker-сети (имя сервиса из docker-compose)
+TORRSERVER_INTERNAL = f"http://torrserver:{TORR_PORT}"
+
+# Публичный URL для генерации .strm-ссылок (читает Infuse снаружи)
+HOST_IP = os.getenv("HOST_IP", "127.0.0.1")
+TORRSERVER_PUBLIC = f"http://{HOST_IP}:{TORR_PORT}"
+
+OUTPUT_DIR = "/app/strm_library"  # Путь внутри Docker-контейнера
+VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.m4v')
+WAKEUP_DELAY = 10
+MAX_RETRIES = 3
+INTERVAL = 300
+# ==============================================================================
+
+
+def clean_title(filename):
+    name = os.path.splitext(filename)[0]
+    name = name.replace('.', ' ').replace('_', ' ')
+
+    # Сначала ищем год — для фильмов
+    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', name)
+
+    # Затем ищем паттерн сезон/эпизод — для сериалов (S02E05, s02e05)
+    season_match = re.search(r'\bS\d{2}E\d{2}\b', name, re.IGNORECASE)
+
+    if season_match:
+        # Сериал: обрезаем до конца SxxExx, всё остальное — мусор
+        clean_name = name[:season_match.end()].strip()
+    elif year_match:
+        # Фильм: обрезаем до конца года
+        clean_name = name[:year_match.end()].strip()
+    else:
+        # Fallback: обрезаем по первому известному тег-слову
+        trash_words = [r'1080p', r'720p', r'2160p', r'4K', r'WEB-DL',
+                       r'BDRip', r'HDR', r'DUB', r'HEVC', r'H\.264']
+        pattern = re.compile(r'\b(' + '|'.join(trash_words) + r')\b', re.IGNORECASE)
+        match = pattern.search(name)
+        clean_name = name[:match.start()].strip() if match else name.strip()
+
+    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    return clean_name or "unknown_title"
+
+
+def get_torrents():
+    try:
+        response = requests.post(
+            f"{TORRSERVER_INTERNAL}/torrents",
+            json={"action": "list"},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"⚠️ Ошибка получения списка торрентов: {e}")
+        return None
+
+
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    torrents = get_torrents()
+    if torrents is None:
+        return
+
+    active_hashes_set = {t.get("hash") for t in torrents if t.get("hash")}
+    if not active_hashes_set:
+        return
+
+    # 1. ПАКЕТНОЕ ПРОБУЖДЕНИЕ
+    pending_hashes = list(active_hashes_set)
+    ready_files = {}
+
+    for attempt in range(MAX_RETRIES):
+        still_pending = []
+        for t_hash in pending_hashes:
+            try:
+                t_resp = requests.post(
+                    f"{TORRSERVER_INTERNAL}/torrents",
+                    json={"action": "get", "hash": t_hash},
+                    timeout=10
+                )
+                t_resp.raise_for_status()
+
+                t_data = t_resp.json()
+                files = t_data.get("file_stats", [])
+
+                if files:
+                    ready_files[t_hash] = files
+                else:
+                    still_pending.append(t_hash)
+            except Exception as e:
+                print(f"⚠️ Ошибка получения метаданных для {t_hash[:8]}...: {e}")
+                still_pending.append(t_hash)
+
+        if not still_pending:
+            break
+
+        pending_hashes = still_pending
+
+        if attempt < MAX_RETRIES - 1:
+            print(f"Ожидают: {len(pending_hashes)} торрентов. Пауза {WAKEUP_DELAY} сек (попытка {attempt+1}/{MAX_RETRIES})...")
+            time.sleep(WAKEUP_DELAY)
+
+    if pending_hashes:
+        print(f"⚠️ Пропущено {len(pending_hashes)} торрентов: не удалось получить метаданные.")
+
+    # 2. ГЕНЕРАЦИЯ — stream_url использует публичный URL, который откроет Infuse
+    for t_hash, files in ready_files.items():
+        for idx, file_info in enumerate(files):
+            file_path = file_info.get("path", "")
+            if not file_path.lower().endswith(VIDEO_EXTENSIONS):
+                continue
+
+            filename = os.path.basename(file_path)
+            encoded_filename = urllib.parse.quote(filename)
+
+            # Используем file_info.get("id"), чтобы не сломать индексы файлов
+            file_id = file_info.get("id", idx + 1)
+            stream_url = (
+                f"{TORRSERVER_PUBLIC}/stream/{encoded_filename}"
+                f"?link={t_hash}&index={file_id}&play"
+            )
+
+            strm_filepath = os.path.join(OUTPUT_DIR, f"{clean_title(filename)}.strm")
+
+            try:
+                with open(strm_filepath, 'x', encoding='utf-8') as f:
+                    f.write(stream_url)
+                print(f"🎬 Создан: {strm_filepath}")
+            except FileExistsError:
+                # Файл существует — проверяем, не изменился ли URL (переиндексация)
+                with open(strm_filepath, 'r', encoding='utf-8') as f:
+                    existing_url = f.read()
+                if existing_url != stream_url:
+                    with open(strm_filepath, 'w', encoding='utf-8') as f:
+                        f.write(stream_url)
+                    print(f"🔄 Обновлён: {strm_filepath}")
+            except Exception as e:
+                print(f"⚠️ Ошибка записи файла {strm_filepath}: {e}")
+
+    # 3. ОЧИСТКА
+    for file in os.listdir(OUTPUT_DIR):
+        if file.endswith('.strm'):
+            filepath = os.path.join(OUTPUT_DIR, file)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                match = re.search(r'link=([a-fA-F0-9]{40})', content)
+                if match and match.group(1) not in active_hashes_set:
+                    os.remove(filepath)
+                    print(f"🗑 Удален: {file}")
+            except Exception as e:
+                print(f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
+
+    sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    print(f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин.")
+    sys.stdout.flush()
+
+    while True:
+        try:
+            main()
+        except Exception as e:
+            print(f"⚠️ Критическая ошибка в главном цикле: {e}")
+            sys.stdout.flush()
+
+        time.sleep(INTERVAL)

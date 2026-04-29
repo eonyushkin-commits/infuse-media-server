@@ -1,0 +1,206 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# СТРОГИЙ РЕЖИМ (Strict Mode)
+# ==============================================================================
+set -euo pipefail
+
+# ==============================================================================
+# КОНСТАНТЫ И ЦВЕТА
+# ==============================================================================
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly CYAN='\033[0;36m'
+readonly NC='\033[0m'
+
+readonly INSTALL_DIR="/opt/infuse-media-server"
+readonly REPO_URL="https://github.com/ВАШ_ЛОГИН/torrserver-infuse-webdav.git" # <--- УКАЖИТЕ СВОЙ РЕПОЗИТОРИЙ
+
+# ==============================================================================
+# ФУНКЦИИ ЛОГИРОВАНИЯ
+# ==============================================================================
+log_info()    { echo -e "${CYAN}[INFO]${NC} $1"; }
+log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_err()     { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+# ==============================================================================
+# ОБРАБОТЧИК ПРЕРЫВАНИЙ И ОШИБОК
+# ==============================================================================
+cleanup() {
+    local exit_code=$?
+    [ $exit_code -ne 0 ] && log_err "Установка прервана (код: $exit_code)."
+}
+trap cleanup EXIT
+trap 'exit 130' INT   # Код 130 для Ctrl+C
+trap 'exit 143' TERM  # Код 143 для SIGTERM
+
+# ==============================================================================
+# ПРОВЕРКА ОКРУЖЕНИЯ
+# ==============================================================================
+check_requirements() {
+    log_info "Проверка системных требований..."
+
+    if [ "$EUID" -ne 0 ]; then
+        log_err "Этот скрипт должен быть запущен с правами root (sudo)."
+        exit 1
+    fi
+
+    local deps=("git" "docker" "curl")
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            log_err "Утилита '$dep' не установлена. Пожалуйста, установите её."
+            exit 1
+        fi
+    done
+
+    # Fail-fast проверка Docker Compose
+    if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+        log_err "Docker Compose не найден (ни v1, ни v2)."
+        exit 1
+    fi
+}
+
+# ==============================================================================
+# ЗАГРУЗКА ИЛИ ОБНОВЛЕНИЕ КОДА
+# ==============================================================================
+fetch_repository() {
+    # Валидация: заглушка в REPO_URL не была заменена
+    if [[ "$REPO_URL" == *"ВАШ_ЛОГИН"* ]]; then
+        log_err "Замените REPO_URL в скрипте на адрес своего репозитория."
+        exit 1
+    fi
+
+    if [ -d "$INSTALL_DIR/.git" ]; then
+        log_info "Проект уже существует в $INSTALL_DIR. Выполняю обновление..."
+        log_warn "Все локальные изменения кода в $INSTALL_DIR будут ПЕРЕЗАПИСАНЫ (кроме .env)."
+        read -rp "Продолжить? [y/N]: " confirm
+        [[ "$confirm" =~ ^[yY]([eE][sS])?$ ]] || { log_info "Обновление отменено."; return 0; }
+
+        (cd "$INSTALL_DIR" && git fetch --all && git reset --hard origin/main)
+    else
+        log_info "Клонирование репозитория в $INSTALL_DIR..."
+        git clone -q "$REPO_URL" "$INSTALL_DIR"
+    fi
+}
+
+# ==============================================================================
+# ГЕНЕРАЦИЯ КОНФИГУРАЦИИ (.env)
+# ==============================================================================
+configure_env() {
+    cd "$INSTALL_DIR"
+
+    if [ -f ".env" ]; then
+        log_warn "Файл .env уже существует. Пересоздать его? [y/N]"
+        read -rp "Ваш выбор: " response
+        if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+            log_info "Сохраняем текущую конфигурацию."
+
+            # Строгая валидация формата .env перед загрузкой
+            # Проверяем, что все не-комментарные, не-пустые строки имеют формат KEY=VALUE
+            grep -vE '^\s*(#|$)' .env | grep -qvE '^[A-Z_][A-Z0-9_]*=' && \
+                { log_err "Файл .env содержит строки неверного формата. Исправьте его или удалите для пересоздания."; exit 1; } || true
+
+            set -a; source .env; set +a
+            return 0
+        fi
+    fi
+
+    log_info "Настройка конфигурации..."
+
+    # --- WebDAV порт ---
+    read -rp "Укажите порт для WebDAV (по умолчанию 8080): " WEBDAV_PORT
+    WEBDAV_PORT=${WEBDAV_PORT:-8080}
+
+    if ! [[ "$WEBDAV_PORT" =~ ^[0-9]+$ ]] || [ "$WEBDAV_PORT" -lt 1 ] || [ "$WEBDAV_PORT" -gt 65535 ]; then
+        log_err "Некорректный порт: $WEBDAV_PORT. Порт должен быть числом от 1 до 65535."
+        exit 1
+    fi
+
+    # --- WebDAV учётные данные ---
+    read -rp "Укажите логин для WebDAV (по умолчанию admin): " WEBDAV_USER
+    WEBDAV_USER=${WEBDAV_USER:-admin}
+
+    read -rsp "Укажите пароль для WebDAV: " WEBDAV_PASSWORD
+    echo
+    [ -z "$WEBDAV_PASSWORD" ] && { log_err "Пароль не может быть пустым."; exit 1; }
+
+    # --- TorrServer: IP и порт ---
+    log_info "Определение внешнего IP-адреса сервера..."
+    AUTO_IP=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || echo "")
+    if ! echo "$AUTO_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+        AUTO_IP="127.0.0.1"
+        log_warn "Не удалось определить внешний IP автоматически. Используется $AUTO_IP."
+    fi
+
+    read -rp "Укажите внешний IP-адрес сервера (по умолчанию $AUTO_IP): " HOST_IP
+    HOST_IP=${HOST_IP:-$AUTO_IP}
+
+    read -rp "Укажите порт для TorrServer (по умолчанию 8090): " TORR_PORT
+    TORR_PORT=${TORR_PORT:-8090}
+
+    if ! [[ "$TORR_PORT" =~ ^[0-9]+$ ]] || [ "$TORR_PORT" -lt 1 ] || [ "$TORR_PORT" -gt 65535 ]; then
+        log_err "Некорректный порт: $TORR_PORT. Порт должен быть числом от 1 до 65535."
+        exit 1
+    fi
+
+    # --- Запись .env ---
+    touch .env && chmod 600 .env
+    cat > .env <<EOF
+# Автоматически сгенерировано скриптом install.sh
+WEBDAV_PORT=$WEBDAV_PORT
+WEBDAV_USER=$WEBDAV_USER
+WEBDAV_PASSWORD=$WEBDAV_PASSWORD
+HOST_IP=$HOST_IP
+TORR_PORT=$TORR_PORT
+EOF
+
+    log_success "Конфигурация успешно сохранена в $INSTALL_DIR/.env"
+    log_warn "Пароль сохранён в открытом виде в $INSTALL_DIR/.env (права: 600)."
+}
+
+# ==============================================================================
+# ЗАПУСК КОНТЕЙНЕРОВ
+# ==============================================================================
+start_services() {
+    log_info "Сборка и запуск Docker-контейнеров..."
+    cd "$INSTALL_DIR"
+
+    # Финальные guards: падаем с читаемой ошибкой, если переменные потерялись
+    : "${WEBDAV_PORT:?Переменная WEBDAV_PORT не задана. Проверьте файл .env}"
+    : "${WEBDAV_USER:?Переменная WEBDAV_USER не задана. Проверьте файл .env}"
+    : "${WEBDAV_PASSWORD:?Переменная WEBDAV_PASSWORD не задана. Проверьте файл .env}"
+    : "${HOST_IP:?Переменная HOST_IP не задана. Проверьте файл .env}"
+    : "${TORR_PORT:?Переменная TORR_PORT не задана. Проверьте файл .env}"
+
+    # Запуск (наличие compose уже гарантировано функцией check_requirements)
+    if docker compose version >/dev/null 2>&1; then
+        docker compose up -d --build
+    else
+        docker-compose up -d --build
+    fi
+
+    echo ""
+    log_success "Установка успешно завершена!"
+    echo "-------------------------------------------------------"
+    log_info "TorrServer UI: http://${HOST_IP}:${TORR_PORT}"
+    log_info "WebDAV URL:    http://${HOST_IP}:${WEBDAV_PORT}"
+    log_info "WebDAV User:   ${WEBDAV_USER}"
+    echo "-------------------------------------------------------"
+    log_info "Логи парсера:  docker logs -f strm-parser"
+}
+
+# ==============================================================================
+# ГЛАВНЫЙ БЛОК ВЫПОЛНЕНИЯ
+# ==============================================================================
+main() {
+    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"
+    check_requirements
+    fetch_repository
+    configure_env
+    start_services
+}
+
+main
