@@ -3,8 +3,6 @@ services:
     image: ionelmc/webdav
     container_name: webdav-infuse
     restart: unless-stopped
-    depends_on:
-      - parser
     ports:
       - "${WEBDAV_PORT}:8080"
     volumes:
@@ -22,15 +20,23 @@ services:
       - "${TORR_PORT}:8090"
     volumes:
       - ./ts:/opt/ts
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/echo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   parser:
     build: .
     container_name: strm-parser
     restart: unless-stopped
     depends_on:
-      - torrserver
+      torrserver:
+        condition: service_healthy
     volumes:
-      - ./:/app
+      - ./torr_to_strm.py:/app/torr_to_strm.py:ro
+      - ./strm_library:/app/strm_library
     environment:
       - HOST_IP=${HOST_IP}
       - TORR_PORT=${TORR_PORT}

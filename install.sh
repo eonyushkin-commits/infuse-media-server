@@ -90,9 +90,9 @@ fetch_repository() {
 # ГЕНЕРАЦИЯ КОНФИГУРАЦИИ (.env)
 # ==============================================================================
 configure_env() {
-    cd "$INSTALL_DIR"
+    local env_file="$INSTALL_DIR/.env"
 
-    if [ -f ".env" ]; then
+    if [ -f "$env_file" ]; then
         log_warn "Файл .env уже существует. Пересоздать его? [y/N]"
         read -rp "Ваш выбор: " response
         if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
@@ -100,10 +100,10 @@ configure_env() {
 
             # Строгая валидация формата .env перед загрузкой
             # Проверяем, что все не-комментарные, не-пустые строки имеют формат KEY=VALUE
-            grep -vE '^\s*(#|$)' .env | grep -qvE '^[A-Z_][A-Z0-9_]*=' && \
+            grep -vE '^\s*(#|$)' "$env_file" | grep -qvE '^[A-Z_][A-Z0-9_]*=' && \
                 { log_err "Файл .env содержит строки неверного формата. Исправьте его или удалите для пересоздания."; exit 1; } || true
 
-            set -a; source .env; set +a
+            set -a; source "$env_file"; set +a
             return 0
         fi
     fi
@@ -147,8 +147,8 @@ configure_env() {
     fi
 
     # --- Запись .env ---
-    touch .env && chmod 600 .env
-    cat > .env <<EOF
+    touch "$env_file" && chmod 600 "$env_file"
+    cat > "$env_file" <<EOF
 # Автоматически сгенерировано скриптом install.sh
 WEBDAV_PORT=$WEBDAV_PORT
 WEBDAV_USER=$WEBDAV_USER
@@ -157,8 +157,8 @@ HOST_IP=$HOST_IP
 TORR_PORT=$TORR_PORT
 EOF
 
-    log_success "Конфигурация успешно сохранена в $INSTALL_DIR/.env"
-    log_warn "Пароль сохранён в открытом виде в $INSTALL_DIR/.env (права: 600)."
+    log_success "Конфигурация успешно сохранена в $env_file"
+    log_warn "Пароль сохранён в открытом виде в $env_file (права: 600)."
 }
 
 # ==============================================================================
@@ -166,7 +166,6 @@ EOF
 # ==============================================================================
 start_services() {
     log_info "Сборка и запуск Docker-контейнеров..."
-    cd "$INSTALL_DIR"
 
     # Финальные guards: падаем с читаемой ошибкой, если переменные потерялись
     : "${WEBDAV_PORT:?Переменная WEBDAV_PORT не задана. Проверьте файл .env}"
@@ -175,12 +174,15 @@ start_services() {
     : "${HOST_IP:?Переменная HOST_IP не задана. Проверьте файл .env}"
     : "${TORR_PORT:?Переменная TORR_PORT не задана. Проверьте файл .env}"
 
-    # Запуск (наличие compose уже гарантировано функцией check_requirements)
-    if docker compose version >/dev/null 2>&1; then
-        docker compose up -d --build
-    else
-        docker-compose up -d --build
-    fi
+    # Запуск в изолированном сабшелле, чтобы не менять рабочую директорию родительского скрипта
+    (
+        cd "$INSTALL_DIR" || exit 1
+        if docker compose version >/dev/null 2>&1; then
+            docker compose up -d --build
+        else
+            docker-compose up -d --build
+        fi
+    )
 
     echo ""
     log_success "Установка успешно завершена!"
