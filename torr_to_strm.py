@@ -28,20 +28,14 @@ def clean_title(filename):
     name = os.path.splitext(filename)[0]
     name = name.replace('.', ' ').replace('_', ' ')
 
-    # Сначала ищем год — для фильмов
     year_match = re.search(r'\b(19\d{2}|20\d{2})\b', name)
-
-    # Затем ищем паттерн сезон/эпизод — для сериалов (S02E05, s02e05)
     season_match = re.search(r'\bS\d{2}E\d{2}\b', name, re.IGNORECASE)
 
     if season_match:
-        # Сериал: обрезаем до конца SxxExx, всё остальное — мусор
         clean_name = name[:season_match.end()].strip()
     elif year_match:
-        # Фильм: обрезаем до конца года
         clean_name = name[:year_match.end()].strip()
     else:
-        # Fallback: обрезаем по первому известному тег-слову
         trash_words = [r'1080p', r'720p', r'2160p', r'4K', r'WEB-DL',
                        r'BDRip', r'HDR', r'DUB', r'HEVC', r'H\.264']
         pattern = re.compile(r'\b(' + '|'.join(trash_words) + r')\b', re.IGNORECASE)
@@ -77,12 +71,12 @@ def main():
     if not active_hashes_set:
         return
 
-    # 1. ПАКЕТНОЕ ПРОБУЖДЕНИЕ
     pending_hashes = list(active_hashes_set)
     ready_files = {}
 
     for attempt in range(MAX_RETRIES):
         still_pending = []
+
         for t_hash in pending_hashes:
             try:
                 t_resp = requests.post(
@@ -97,35 +91,33 @@ def main():
 
                 if files:
                     ready_files[t_hash] = files
-                    # FIX 1: явно логируем успешное получение метаданных
                     print(f"✅ {t_hash[:8]}...: получено {len(files)} файлов")
                 else:
-                    # FIX 2: разделяем «пусто» и «ошибка» — пишем разные сообщения
                     print(f"⏳ {t_hash[:8]}...: file_stats пуст, торрент ещё загружается")
                     still_pending.append(t_hash)
             except Exception as e:
                 print(f"⚠️ {t_hash[:8]}...: ошибка запроса — {e}")
                 still_pending.append(t_hash)
 
-        if not still_pending:
-            break
-
+        # Ключевой фикс: обновляем pending_hashes до break
         pending_hashes = still_pending
 
+        if not pending_hashes:
+            break
+
         if attempt < MAX_RETRIES - 1:
-            # FIX 3: используем still_pending (актуальный список) вместо pending_hashes
-            # (pending_hashes обновится только в начале следующей итерации)
-            # FIX 4: нумерация «попытка X/N» — показываем завершённую попытку, а не следующую
-            print(f"Ожидают: {len(still_pending)} торрентов. "
-                  f"Пауза {WAKEUP_DELAY} сек (попытка {attempt + 1}/{MAX_RETRIES} завершена)...")
+            print(
+                f"Ожидают: {len(pending_hashes)} торрентов. "
+                f"Пауза {WAKEUP_DELAY} сек (попытка {attempt + 1}/{MAX_RETRIES} завершена)..."
+            )
             time.sleep(WAKEUP_DELAY)
 
-    # pending_hashes здесь == still_pending последней итерации
     if pending_hashes:
-        print(f"⚠️ Пропущено {len(pending_hashes)} торрентов после {MAX_RETRIES} попыток: "
-              f"метаданные недоступны. Хэши: {[h[:8] for h in pending_hashes]}")
+        print(
+            f"⚠️ Пропущено {len(pending_hashes)} торрентов после {MAX_RETRIES} попыток: "
+            f"метаданные недоступны. Хэши: {[h[:8] for h in pending_hashes]}"
+        )
 
-    # 2. ГЕНЕРАЦИЯ — stream_url использует публичный URL, который откроет Infuse
     for t_hash, files in ready_files.items():
         for idx, file_info in enumerate(files):
             file_path = file_info.get("path", "")
@@ -135,7 +127,6 @@ def main():
             filename = os.path.basename(file_path)
             encoded_filename = urllib.parse.quote(filename)
 
-            # Используем file_info.get("id"), чтобы не сломать индексы файлов
             file_id = file_info.get("id", idx + 1)
             stream_url = (
                 f"{TORRSERVER_PUBLIC}/stream/{encoded_filename}"
@@ -149,7 +140,6 @@ def main():
                     f.write(stream_url)
                 print(f"🎬 Создан: {strm_filepath}")
             except FileExistsError:
-                # Файл существует — проверяем, не изменился ли URL (переиндексация)
                 with open(strm_filepath, 'r', encoding='utf-8') as f:
                     existing_url = f.read()
                 if existing_url != stream_url:
@@ -159,7 +149,6 @@ def main():
             except Exception as e:
                 print(f"⚠️ Ошибка записи файла {strm_filepath}: {e}")
 
-    # 3. ОЧИСТКА
     for file in os.listdir(OUTPUT_DIR):
         if file.endswith('.strm'):
             filepath = os.path.join(OUTPUT_DIR, file)
