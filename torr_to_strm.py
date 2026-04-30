@@ -97,10 +97,14 @@ def main():
 
                 if files:
                     ready_files[t_hash] = files
+                    # FIX 1: явно логируем успешное получение метаданных
+                    print(f"✅ {t_hash[:8]}...: получено {len(files)} файлов")
                 else:
+                    # FIX 2: разделяем «пусто» и «ошибка» — пишем разные сообщения
+                    print(f"⏳ {t_hash[:8]}...: file_stats пуст, торрент ещё загружается")
                     still_pending.append(t_hash)
             except Exception as e:
-                print(f"⚠️ Ошибка получения метаданных для {t_hash[:8]}...: {e}")
+                print(f"⚠️ {t_hash[:8]}...: ошибка запроса — {e}")
                 still_pending.append(t_hash)
 
         if not still_pending:
@@ -109,11 +113,17 @@ def main():
         pending_hashes = still_pending
 
         if attempt < MAX_RETRIES - 1:
-            print(f"Ожидают: {len(pending_hashes)} торрентов. Пауза {WAKEUP_DELAY} сек (попытка {attempt+1}/{MAX_RETRIES})...")
+            # FIX 3: используем still_pending (актуальный список) вместо pending_hashes
+            # (pending_hashes обновится только в начале следующей итерации)
+            # FIX 4: нумерация «попытка X/N» — показываем завершённую попытку, а не следующую
+            print(f"Ожидают: {len(still_pending)} торрентов. "
+                  f"Пауза {WAKEUP_DELAY} сек (попытка {attempt + 1}/{MAX_RETRIES} завершена)...")
             time.sleep(WAKEUP_DELAY)
 
+    # pending_hashes здесь == still_pending последней итерации
     if pending_hashes:
-        print(f"⚠️ Пропущено {len(pending_hashes)} торрентов: не удалось получить метаданные.")
+        print(f"⚠️ Пропущено {len(pending_hashes)} торрентов после {MAX_RETRIES} попыток: "
+              f"метаданные недоступны. Хэши: {[h[:8] for h in pending_hashes]}")
 
     # 2. ГЕНЕРАЦИЯ — stream_url использует публичный URL, который откроет Infuse
     for t_hash, files in ready_files.items():
