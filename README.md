@@ -79,7 +79,7 @@ chmod +x install.sh
 
 - `install.sh` — установка, обновление и переконфигурация;
 - `.env` — параметры окружения;
-- `./app` — код parser-сервиса;
+- `./torr_to_strm.py` — скрипт парсера;
 - `./strm-library` — библиотека `.strm`-файлов для Infuse;
 - `./ts` — данные TorrServer;
 - `docker-compose.yml` — описание контейнеров проекта.

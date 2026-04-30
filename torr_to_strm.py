@@ -1,3 +1,60 @@
+import os
+import requests
+import re
+import urllib.parse
+import time
+import sys
+
+
+# ================= НАСТРОЙКИ (берутся из .env или системных) =================
+TORR_PORT = os.getenv("TORR_PORT", "8090")
+TORRSERVER_INTERNAL = f"http://torrserver:{TORR_PORT}"
+HOST_IP = os.getenv("HOST_IP", "127.0.0.1")
+TORRSERVER_PUBLIC = f"http://{HOST_IP}:{TORR_PORT}"
+OUTPUT_DIR = "/app/strm_library"
+VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.m4v')
+WAKEUP_DELAY = 10
+MAX_RETRIES = 3
+INTERVAL = 300
+# ==============================================================================
+
+
+def clean_title(filename):
+    name = os.path.splitext(filename)[0]
+    name = name.replace('.', ' ').replace('_', ' ')
+
+    year_match = re.search(r'\b(19\d{2}|20\d{2})\b', name)
+    season_match = re.search(r'\bS\d{2}E\d{2}\b', name, re.IGNORECASE)
+
+    if season_match:
+        clean_name = name[:season_match.end()].strip()
+    elif year_match:
+        clean_name = name[:year_match.end()].strip()
+    else:
+        trash_words = [r'1080p', r'720p', r'2160p', r'4K', r'WEB-DL',
+                       r'BDRip', r'HDR', r'DUB', r'HEVC', r'H\.264']
+        pattern = re.compile(r'\b(' + '|'.join(trash_words) + r')\b', re.IGNORECASE)
+        match = pattern.search(name)
+        clean_name = name[:match.start()].strip() if match else name.strip()
+
+    clean_name = re.sub(r'\s+', ' ', clean_name).strip()
+    return clean_name or "unknown_title"
+
+
+def get_torrents():
+    try:
+        response = requests.post(
+            f"{TORRSERVER_INTERNAL}/torrents",
+            json={"action": "list"},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"⚠️ Ошибка получения списка торрентов: {e}")
+        return None
+
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -5,7 +62,6 @@ def main():
     if torrents is None:
         return
 
-    # === Изменения по замечанию №3 ===
     active_hashes_set = set()
     for t in torrents:
         t_hash = t.get("hash")
@@ -14,7 +70,6 @@ def main():
         else:
             t_title = t.get("title", "Неизвестное_название")
             print(f"⚠️ Пропущен торрент без хэша (ожидает инициализации или ошибка). Название: {t_title}")
-    # =================================
 
     if not active_hashes_set:
         return
@@ -47,7 +102,6 @@ def main():
                 print(f"⚠️ {t_hash[:8]}...: ошибка запроса — {e}")
                 still_pending.append(t_hash)
 
-        # Ключевой фикс: обновляем pending_hashes до break
         pending_hashes = still_pending
 
         if not pending_hashes:
@@ -112,3 +166,17 @@ def main():
                 print(f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
 
     sys.stdout.flush()
+
+
+if __name__ == "__main__":
+    print(f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин.")
+    sys.stdout.flush()
+
+    while True:
+        try:
+            main()
+        except Exception as e:
+            print(f"⚠️ Критическая ошибка в главном цикле: {e}")
+            sys.stdout.flush()
+
+        time.sleep(INTERVAL)
