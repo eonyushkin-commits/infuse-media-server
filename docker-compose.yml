@@ -1,6 +1,6 @@
 services:
   webdav:
-    image: ionelmc/webdav:1.2
+    image: ionelmc/webdav
     container_name: webdav-infuse
     restart: unless-stopped
     ports:
