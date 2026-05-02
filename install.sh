@@ -79,7 +79,12 @@ fetch_repository() {
         read -rp "Продолжить? [y/N]: " confirm
         [[ "$confirm" =~ ^[yY]([eE][sS])?$ ]] || { log_info "Обновление отменено."; return 0; }
 
-        (cd "$INSTALL_DIR" && git fetch --all && git reset --hard origin/main)
+        log_info "Остановка текущих сервисов перед обновлением..."
+        (
+            cd "$INSTALL_DIR"
+            docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
+            git fetch --all && git reset --hard origin/main
+        )
     else
         log_info "Клонирование репозитория в $INSTALL_DIR..."
         git clone -q "$REPO_URL" "$INSTALL_DIR"
