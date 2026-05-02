@@ -8,7 +8,8 @@ import sys
 
 # ================= НАСТРОЙКИ (берутся из .env или системных) =================
 TORR_PORT = os.getenv("TORR_PORT", "8090")
-TORRSERVER_INTERNAL = f"http://torrserver:{TORR_PORT}"
+TORR_INTERNAL_PORT = os.getenv("TORR_INTERNAL_PORT", "8090")
+TORRSERVER_INTERNAL = f"http://torrserver:{TORR_INTERNAL_PORT}"
 HOST_IP = os.getenv("HOST_IP", "127.0.0.1")
 TORRSERVER_PUBLIC = f"http://{HOST_IP}:{TORR_PORT}"
 OUTPUT_DIR = "/app/strm_library"
