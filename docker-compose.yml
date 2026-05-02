@@ -1,6 +1,6 @@
 services:
   webdav:
-    image: ionelmc/webdav
+    image: ionelmc/webdav:1.2
     container_name: webdav-infuse
     restart: unless-stopped
     ports:
@@ -13,7 +13,7 @@ services:
       - UID=0
 
   torrserver:
-    image: ghcr.io/yourok/torrserver:latest
+    image: ghcr.io/yourok/torrserver:MatriX.141
     container_name: torrserver
     restart: unless-stopped
     volumes:
@@ -26,7 +26,7 @@ services:
       start_period: 10s
 
   torr-proxy:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     container_name: torr-proxy
     restart: unless-stopped
     ports:
