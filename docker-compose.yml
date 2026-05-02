@@ -16,8 +16,6 @@ services:
     image: ghcr.io/yourok/torrserver:latest
     container_name: torrserver
     restart: unless-stopped
-    ports:
-      - "${TORR_PORT}:8090"
     volumes:
       - ./ts:/opt/ts
     healthcheck:
@@ -27,6 +25,18 @@ services:
       retries: 5
       start_period: 10s
 
+  torr-proxy:
+    image: nginx:alpine
+    container_name: torr-proxy
+    restart: unless-stopped
+    ports:
+      - "${TORR_PORT}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./.htpasswd:/etc/nginx/.htpasswd:ro
+    depends_on:
+      - torrserver
+
   parser:
     build: .
     container_name: strm-parser
@@ -35,9 +45,10 @@ services:
       torrserver:
         condition: service_healthy
     volumes:
-      - ./torr_to_strm.py:/app/torr_to_strm.py:ro
       - ./strm_library:/app/strm_library
     environment:
       - HOST_IP=${HOST_IP}
       - TORR_PORT=${TORR_PORT}
       - TORR_INTERNAL_PORT=8090
+      - WEBDAV_USER=${WEBDAV_USER}
+      - WEBDAV_PASSWORD=${WEBDAV_PASSWORD}

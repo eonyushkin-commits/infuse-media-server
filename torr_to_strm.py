@@ -5,20 +5,23 @@ import urllib.parse
 import time
 import sys
 
-
 # ================= НАСТРОЙКИ (берутся из .env или системных) =================
 TORR_PORT = os.getenv("TORR_PORT", "8090")
 TORR_INTERNAL_PORT = os.getenv("TORR_INTERNAL_PORT", "8090")
 TORRSERVER_INTERNAL = f"http://torrserver:{TORR_INTERNAL_PORT}"
 HOST_IP = os.getenv("HOST_IP", "127.0.0.1")
-TORRSERVER_PUBLIC = f"http://{HOST_IP}:{TORR_PORT}"
+
+AUTH_USER = urllib.parse.quote(os.getenv("WEBDAV_USER", "admin"))
+AUTH_PASS = urllib.parse.quote(os.getenv("WEBDAV_PASSWORD", ""))
+AUTH_PREFIX = f"{AUTH_USER}:{AUTH_PASS}@" if AUTH_PASS else ""
+
+TORRSERVER_PUBLIC = f"http://{AUTH_PREFIX}{HOST_IP}:{TORR_PORT}"
 OUTPUT_DIR = "/app/strm_library"
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.ts', '.m2ts', '.m4v')
 WAKEUP_DELAY = 10
 MAX_RETRIES = 3
 INTERVAL = 300
 # ==============================================================================
-
 
 def clean_title(filename):
     name = os.path.splitext(filename)[0]
@@ -41,7 +44,6 @@ def clean_title(filename):
     clean_name = re.sub(r'\s+', ' ', clean_name).strip()
     return clean_name or "unknown_title"
 
-
 def get_torrents():
     try:
         response = requests.post(
@@ -54,7 +56,6 @@ def get_torrents():
     except Exception as e:
         print(f"⚠️ Ошибка получения списка торрентов: {e}")
         return None
-
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -167,7 +168,6 @@ def main():
                 print(f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
 
     sys.stdout.flush()
-
 
 if __name__ == "__main__":
     print(f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин.")

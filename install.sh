@@ -21,10 +21,10 @@ readonly REPO_URL="https://github.com/eonyushkin-commits/infuse-media-server.git
 # ==============================================================================
 # ФУНКЦИИ ЛОГИРОВАНИЯ
 # ==============================================================================
-log_info()    { echo -e "${CYAN}[INFO]${NC} $1"; }
+log_info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_err()     { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_err() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 # ==============================================================================
 # ОБРАБОТЧИК ПРЕРЫВАНИЙ И ОШИБОК
@@ -34,8 +34,8 @@ cleanup() {
     [ $exit_code -ne 0 ] && log_err "Установка прервана (код: $exit_code)."
 }
 trap cleanup EXIT
-trap 'exit 130' INT   # Код 130 для Ctrl+C
-trap 'exit 143' TERM  # Код 143 для SIGTERM
+trap 'exit 130' INT # Код 130 для Ctrl+C
+trap 'exit 143' TERM # Код 143 для SIGTERM
 
 # ==============================================================================
 # ПРОВЕРКА ОКРУЖЕНИЯ
@@ -87,7 +87,7 @@ fetch_repository() {
 }
 
 # ==============================================================================
-# ГЕНЕРАЦИЯ КОНФИГУРАЦИИ (.env)
+# ГЕНЕРАЦИЯ КОНФИГУРАЦИИ (.env И NGINX PROXY)
 # ==============================================================================
 configure_env() {
     local env_file="$INSTALL_DIR/.env"
@@ -99,11 +99,27 @@ configure_env() {
             log_info "Сохраняем текущую конфигурацию."
 
             # Строгая валидация формата .env перед загрузкой
-            # Проверяем, что все не-комментарные, не-пустые строки имеют формат KEY=VALUE
             grep -vE '^\s*(#|$)' "$env_file" | grep -qvE '^[A-Z_][A-Z0-9_]*=' && \
-                { log_err "Файл .env содержит строки неверного формата. Исправьте его или удалите для пересоздания."; exit 1; } || true
+            { log_err "Файл .env содержит строки неверного формата. Исправьте его или удалите для пересоздания."; exit 1; } || true
 
             set -a; source "$env_file"; set +a
+            
+            # Если .env не пересоздаётся, всё равно нужно сгенерировать конфиги Nginx для обновления
+            log_info "Обновление ключей доступа для TorrServer..."
+            docker run --rm httpd:alpine htpasswd -bn "$WEBDAV_USER" "$WEBDAV_PASSWORD" > "$INSTALL_DIR/.htpasswd"
+            chmod 600 "$INSTALL_DIR/.htpasswd"
+
+            cat > "$INSTALL_DIR/nginx.conf" << 'EOF'
+server {
+    listen 80;
+    location / {
+        auth_basic "Restricted Area";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://torrserver:8090;
+        proxy_set_header Host $host;
+    }
+}
+EOF
             return 0
         fi
     fi
@@ -120,10 +136,10 @@ configure_env() {
     fi
 
     # --- WebDAV учётные данные ---
-    read -rp "Укажите логин для WebDAV (по умолчанию admin): " WEBDAV_USER
+    read -rp "Укажите логин для WebDAV и TorrServer (по умолчанию admin): " WEBDAV_USER
     WEBDAV_USER=${WEBDAV_USER:-admin}
 
-    read -rsp "Укажите пароль для WebDAV: " WEBDAV_PASSWORD
+    read -rsp "Укажите пароль для WebDAV и TorrServer: " WEBDAV_PASSWORD
     echo
     [ -z "$WEBDAV_PASSWORD" ] && { log_err "Пароль не может быть пустым."; exit 1; }
 
@@ -140,7 +156,7 @@ configure_env() {
 
     # Генерируем случайный порт в диапазоне 10000-60000
     AUTO_TORR_PORT=$(shuf -i 10000-60000 -n 1)
-    read -rp "Укажите порт для TorrServer (по умолчанию $AUTO_TORR_PORT): " TORR_PORT
+    read -rp "Укажите публичный порт для TorrServer (по умолчанию $AUTO_TORR_PORT): " TORR_PORT
     TORR_PORT=${TORR_PORT:-$AUTO_TORR_PORT}
 
     if ! [[ "$TORR_PORT" =~ ^[0-9]+$ ]] || [ "$TORR_PORT" -lt 1 ] || [ "$TORR_PORT" -gt 65535 ]; then
@@ -156,7 +172,6 @@ configure_env() {
     # --- Запись .env ---
     touch "$env_file" && chmod 600 "$env_file"
     cat > "$env_file" <<EOF
-# Автоматически сгенерировано скриптом install.sh
 WEBDAV_PORT=$WEBDAV_PORT
 WEBDAV_USER=$WEBDAV_USER
 WEBDAV_PASSWORD=$WEBDAV_PASSWORD
@@ -164,41 +179,46 @@ HOST_IP=$HOST_IP
 TORR_PORT=$TORR_PORT
 EOF
 
-    log_success "Конфигурация успешно сохранена в $env_file"
-    log_warn "Пароль сохранён в открытом виде в $env_file (права: 600)."
+    # === НОВЫЙ БЛОК ГЕНЕРАЦИИ NGINX ===
+    log_info "Генерация ключей доступа для TorrServer proxy..."
+    docker run --rm httpd:alpine htpasswd -bn "$WEBDAV_USER" "$WEBDAV_PASSWORD" > "$INSTALL_DIR/.htpasswd"
+    chmod 600 "$INSTALL_DIR/.htpasswd"
+
+    cat > "$INSTALL_DIR/nginx.conf" << 'EOF'
+server {
+    listen 80;
+    location / {
+        auth_basic "Restricted Area";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+        proxy_pass http://torrserver:8090;
+        proxy_set_header Host $host;
+    }
+}
+EOF
+    # ==================================
 }
 
 # ==============================================================================
-# ЗАПУСК КОНТЕЙНЕРОВ
+# ЗАПУСК СЕРВИСОВ И ВЫВОД ИНФОРМАЦИИ
 # ==============================================================================
 start_services() {
-    log_info "Сборка и запуск Docker-контейнеров..."
-
-    # Финальные guards: падаем с читаемой ошибкой, если переменные потерялись
-    : "${WEBDAV_PORT:?Переменная WEBDAV_PORT не задана. Проверьте файл .env}"
-    : "${WEBDAV_USER:?Переменная WEBDAV_USER не задана. Проверьте файл .env}"
-    : "${WEBDAV_PASSWORD:?Переменная WEBDAV_PASSWORD не задана. Проверьте файл .env}"
-    : "${HOST_IP:?Переменная HOST_IP не задана. Проверьте файл .env}"
-    : "${TORR_PORT:?Переменная TORR_PORT не задана. Проверьте файл .env}"
-
-    # Запуск в изолированном сабшелле, чтобы не менять рабочую директорию родительского скрипта
-    (
-        cd "$INSTALL_DIR" || exit 1
-        if docker compose version >/dev/null 2>&1; then
-            docker compose up -d --build
-        else
-            docker-compose up -d --build
-        fi
-    )
+    log_info "Запуск Docker-контейнеров..."
+    cd "$INSTALL_DIR"
+    
+    if docker compose version >/dev/null 2>&1; then
+        docker compose up -d --build
+    else
+        docker-compose up -d --build
+    fi
 
     echo ""
     log_success "Установка успешно завершена!"
     echo "-------------------------------------------------------"
     log_info "TorrServer UI: http://${HOST_IP}:${TORR_PORT}"
-    log_info "WebDAV URL:    http://${HOST_IP}:${WEBDAV_PORT}"
-    log_info "WebDAV User:   ${WEBDAV_USER}"
+    log_info "WebDAV URL: http://${HOST_IP}:${WEBDAV_PORT}"
+    log_info "Логин для входа (WebDAV и TorrServer): ${WEBDAV_USER}"
     echo "-------------------------------------------------------"
-    log_info "Логи парсера:  docker logs -f strm-parser"
+    log_info "Логи парсера: docker logs -f strm-parser"
 }
 
 # ==============================================================================
