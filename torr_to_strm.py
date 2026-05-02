@@ -23,6 +23,8 @@ MAX_RETRIES = 3
 INTERVAL = 300
 # ==============================================================================
 
+session = requests.Session()
+
 def clean_title(filename):
     name = os.path.splitext(filename)[0]
     name = name.replace('.', ' ').replace('_', ' ')
@@ -44,9 +46,10 @@ def clean_title(filename):
     clean_name = re.sub(r'\s+', ' ', clean_name).strip()
     return clean_name or "unknown_title"
 
+
 def get_torrents():
     try:
-        response = requests.post(
+        response = session.post(
             f"{TORRSERVER_INTERNAL}/torrents",
             json={"action": "list"},
             timeout=10
@@ -56,6 +59,7 @@ def get_torrents():
     except Exception as e:
         print(f"⚠️ Ошибка получения списка торрентов: {e}")
         return None
+
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -84,7 +88,7 @@ def main():
 
         for t_hash in pending_hashes:
             try:
-                t_resp = requests.post(
+                t_resp = session.post(
                     f"{TORRSERVER_INTERNAL}/torrents",
                     json={"action": "get", "hash": t_hash},
                     timeout=10
@@ -168,6 +172,7 @@ def main():
                 print(f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
 
     sys.stdout.flush()
+
 
 if __name__ == "__main__":
     print(f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин.")
