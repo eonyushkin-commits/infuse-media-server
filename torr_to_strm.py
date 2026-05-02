@@ -141,7 +141,7 @@ def main():
                 f"?link={t_hash}&index={file_id}&play"
             )
 
-            strm_filepath = os.path.join(OUTPUT_DIR, f"{clean_title(filename)}.strm")
+            strm_filepath = os.path.join(OUTPUT_DIR, f"{clean_title(filename)}.{t_hash[:8]}.strm")
 
             try:
                 with open(strm_filepath, 'x', encoding='utf-8') as f:
