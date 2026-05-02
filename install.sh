@@ -138,11 +138,18 @@ configure_env() {
     read -rp "Укажите внешний IP-адрес сервера (по умолчанию $AUTO_IP): " HOST_IP
     HOST_IP=${HOST_IP:-$AUTO_IP}
 
-    read -rp "Укажите порт для TorrServer (по умолчанию 8090): " TORR_PORT
-    TORR_PORT=${TORR_PORT:-8090}
+    # Генерируем случайный порт в диапазоне 10000-60000
+    AUTO_TORR_PORT=$(shuf -i 10000-60000 -n 1)
+    read -rp "Укажите порт для TorrServer (по умолчанию $AUTO_TORR_PORT): " TORR_PORT
+    TORR_PORT=${TORR_PORT:-$AUTO_TORR_PORT}
 
     if ! [[ "$TORR_PORT" =~ ^[0-9]+$ ]] || [ "$TORR_PORT" -lt 1 ] || [ "$TORR_PORT" -gt 65535 ]; then
         log_err "Некорректный порт: $TORR_PORT. Порт должен быть числом от 1 до 65535."
+        exit 1
+    fi
+    # Проверяем что порт не занят
+    if ss -tlun | grep -q ":${TORR_PORT} "; then
+        log_err "Порт $TORR_PORT уже занят. Запустите установку заново или укажите другой порт."
         exit 1
     fi
 
