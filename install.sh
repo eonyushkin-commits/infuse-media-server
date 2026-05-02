@@ -182,7 +182,7 @@ EOF
     # === НОВЫЙ БЛОК ГЕНЕРАЦИИ NGINX ===
     log_info "Генерация ключей доступа для TorrServer proxy..."
     docker run --rm httpd:alpine htpasswd -bn "$WEBDAV_USER" "$WEBDAV_PASSWORD" > "$INSTALL_DIR/.htpasswd"
-    chmod 600 "$INSTALL_DIR/.htpasswd"
+    chmod 644 "$INSTALL_DIR/.htpasswd"
 
     cat > "$INSTALL_DIR/nginx.conf" << 'EOF'
 server {
