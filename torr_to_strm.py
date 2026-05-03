@@ -4,6 +4,8 @@ import re
 import urllib.parse
 import time
 import sys
+import signal
+import threading
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -234,9 +236,19 @@ if __name__ == "__main__":
         f"Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин."
     )
 
-    while True:
+    shutdown_event = threading.Event()
+    
+    def handle_sigterm(signum, frame):
+        log("INFO", "🛑 Получен сигнал завершения. Остановка парсера...")
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    signal.signal(signal.SIGINT, handle_sigterm)
+
+    while not shutdown_event.is_set():
         try:
             main()
         except Exception as e:
             log("ERROR", f"⚠️ Критическая ошибка в главном цикле: {e}")
-        time.sleep(INTERVAL)
+        
+        shutdown_event.wait(timeout=INTERVAL)
