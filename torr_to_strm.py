@@ -4,6 +4,8 @@ import re
 import urllib.parse
 import time
 import sys
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ================= НАСТРОЙКИ (берутся из .env или системных) =================
 TORR_PORT = os.getenv("TORR_PORT", "8090")
@@ -24,6 +26,16 @@ INTERVAL = 300
 # ==============================================================================
 
 session = requests.Session()
+
+retry_config = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=(500, 502, 503, 504),
+    allowed_methods=("HEAD", "GET", "POST")
+)
+adapter = HTTPAdapter(max_retries=retry_config)
+session.mount("http://", adapter)
+session.mount("https://", adapter)
 
 
 def log(level: str, message: str) -> None:
@@ -68,6 +80,21 @@ def get_torrents():
 
 
 def main():
+    if not HOST_IP or HOST_IP == "127.0.0.1":
+        log(
+            "WARN",
+            "⚠️ HOST_IP не задан или указан localhost — Infuse не сможет воспроизвести видео!"
+        )
+
+    try:
+        int(TORR_PORT)
+    except ValueError:
+        log(
+            "ERROR",
+            f"⚠️ TORR_PORT имеет некорректное значение: {TORR_PORT} — ссылки в .strm будут битые"
+        )
+        return
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     torrents = get_torrents()
