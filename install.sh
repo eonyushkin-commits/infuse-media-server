@@ -83,7 +83,8 @@ fetch_repository() {
         (
             cd "$INSTALL_DIR"
             docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
-            git fetch --all && git reset --hard origin/main
+            LOCAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+            git fetch --all && git reset --hard "origin/$LOCAL_BRANCH"
         )
     else
         log_info "Клонирование репозитория в $INSTALL_DIR..."
@@ -230,7 +231,7 @@ start_services() {
 # ГЛАВНЫЙ БЛОК ВЫПОЛНЕНИЯ
 # ==============================================================================
 main() {
-    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"
+    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"`
     check_requirements
     fetch_repository
     configure_env
