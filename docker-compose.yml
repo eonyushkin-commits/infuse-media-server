@@ -44,6 +44,11 @@ services:
     depends_on:
       torrserver:
         condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./strm_library:/app/strm_library
     environment:
