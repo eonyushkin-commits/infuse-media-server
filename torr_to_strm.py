@@ -25,6 +25,12 @@ INTERVAL = 300
 
 session = requests.Session()
 
+
+def log(level: str, message: str) -> None:
+    ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+    print(f"{ts} [UTC] [{level}] {message}", flush=True)
+
+
 def clean_title(filename):
     name = os.path.splitext(filename)[0]
     name = name.replace('.', ' ').replace('_', ' ')
@@ -57,7 +63,7 @@ def get_torrents():
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"⚠️ Ошибка получения списка торрентов: {e}")
+        log("ERROR", f"⚠️ Ошибка получения списка торрентов: {e}")
         return None
 
 
@@ -75,7 +81,11 @@ def main():
             active_hashes_set.add(t_hash)
         else:
             t_title = t.get("title", "Неизвестное_название")
-            print(f"⚠️ Пропущен торрент без хэша (ожидает инициализации или ошибка). Название: {t_title}")
+            log(
+                "WARN",
+                f"⚠️ Пропущен торрент без хэша (ожидает инициализации или ошибка). "
+                f"Название: {t_title}"
+            )
 
     if not active_hashes_set:
         return
@@ -100,12 +110,15 @@ def main():
 
                 if files:
                     ready_files[t_hash] = files
-                    print(f"✅ {t_hash[:8]}...: получено {len(files)} файлов")
+                    log("INFO", f"✅ {t_hash[:8]}...: получено {len(files)} файлов")
                 else:
-                    print(f"⏳ {t_hash[:8]}...: file_stats пуст, торрент ещё загружается")
+                    log(
+                        "INFO",
+                        f"⏳ {t_hash[:8]}...: file_stats пуст, торрент ещё загружается"
+                    )
                     still_pending.append(t_hash)
             except Exception as e:
-                print(f"⚠️ {t_hash[:8]}...: ошибка запроса — {e}")
+                log("ERROR", f"⚠️ {t_hash[:8]}...: ошибка запроса — {e}")
                 still_pending.append(t_hash)
 
         pending_hashes = still_pending
@@ -114,14 +127,16 @@ def main():
             break
 
         if attempt < MAX_RETRIES - 1:
-            print(
+            log(
+                "INFO",
                 f"Ожидают: {len(pending_hashes)} торрентов. "
                 f"Пауза {WAKEUP_DELAY} сек (попытка {attempt + 1}/{MAX_RETRIES} завершена)..."
             )
             time.sleep(WAKEUP_DELAY)
 
     if pending_hashes:
-        print(
+        log(
+            "WARN",
             f"⚠️ Пропущено {len(pending_hashes)} торрентов после {MAX_RETRIES} попыток: "
             f"метаданные недоступны. Хэши: {[h[:8] for h in pending_hashes]}"
         )
@@ -141,7 +156,10 @@ def main():
                 f"?link={t_hash}&index={file_id}&play"
             )
 
-            strm_filepath = os.path.join(OUTPUT_DIR, f"{clean_title(filename)}.{t_hash[:8]}.strm")
+            strm_filepath = os.path.join(
+                OUTPUT_DIR,
+                f"{clean_title(filename)}.{t_hash[:8]}.strm"
+            )
 
             try:
                 if os.path.exists(strm_filepath):
@@ -155,14 +173,17 @@ def main():
                 tmp_filepath = f"{strm_filepath}.tmp"
                 with open(tmp_filepath, 'w', encoding='utf-8') as f:
                     f.write(stream_url)
-                
+
                 os.replace(tmp_filepath, strm_filepath)
-                print(f"{action_msg}: {strm_filepath}")
+                log("INFO", f"{action_msg}: {strm_filepath}")
 
             except Exception as e:
-                if 'tmp_filepath' in locals() and os.path.exists(tmp_filepath):
-                    os.remove(tmp_filepath)
-                print(f"⚠️ Ошибка записи файла {strm_filepath}: {e}")
+                try:
+                    if 'tmp_filepath' in locals() and os.path.exists(tmp_filepath):
+                        os.remove(tmp_filepath)
+                except Exception:
+                    pass
+                log("ERROR", f"⚠️ Ошибка записи файла {strm_filepath}: {e}")
 
     for file in os.listdir(OUTPUT_DIR):
         if file.endswith('.strm'):
@@ -174,22 +195,21 @@ def main():
                 match = re.search(r'link=([a-fA-F0-9]{40})', content)
                 if match and match.group(1) not in active_hashes_set:
                     os.remove(filepath)
-                    print(f"🗑 Удален: {file}")
+                    log("INFO", f"🗑 Удалён устаревший файл: {file}")
             except Exception as e:
-                print(f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
-
-    sys.stdout.flush()
+                log("ERROR", f"⚠️ Ошибка при чтении/удалении файла {filepath}: {e}")
 
 
 if __name__ == "__main__":
-    print(f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин.")
-    sys.stdout.flush()
+    log(
+        "INFO",
+        f"🚀 Парсер запущен. Internal: {TORRSERVER_INTERNAL} | "
+        f"Public: {TORRSERVER_PUBLIC} | Интервал: {INTERVAL // 60} мин."
+    )
 
     while True:
         try:
             main()
         except Exception as e:
-            print(f"⚠️ Критическая ошибка в главном цикле: {e}")
-            sys.stdout.flush()
-
+            log("ERROR", f"⚠️ Критическая ошибка в главном цикле: {e}")
         time.sleep(INTERVAL)
