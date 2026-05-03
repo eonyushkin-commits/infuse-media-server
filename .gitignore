@@ -10,3 +10,5 @@ strm_library/
 # Игнорируем кэш Python
 __pycache__/
 *.pyc
+
+.htpasswd
