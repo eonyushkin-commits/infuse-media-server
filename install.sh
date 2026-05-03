@@ -15,8 +15,8 @@ readonly BLUE='\033[0;34m'
 readonly CYAN='\033[0;36m'
 readonly NC='\033[0m'
 
-readonly INSTALL_DIR="/opt/infuse-media-server"
-readonly REPO_URL="https://github.com/eonyushkin-commits/infuse-media-server.git"
+readonly INSTALL_DIR="/opt/torrserver-infuse-bridge"
+readonly REPO_URL="https://github.com/eonyushkin-commits/torrserver-infuse-bridge.git"
 
 # ==============================================================================
 # ФУНКЦИИ ЛОГИРОВАНИЯ
@@ -231,7 +231,7 @@ start_services() {
 # ГЛАВНЫЙ БЛОК ВЫПОЛНЕНИЯ
 # ==============================================================================
 main() {
-    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"
+    echo -e "${BLUE}=== Установка TorrServer to Infuse Media Bridge ===${NC}"
     check_requirements
     fetch_repository
     configure_env
