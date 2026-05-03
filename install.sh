@@ -231,7 +231,7 @@ start_services() {
 # ГЛАВНЫЙ БЛОК ВЫПОЛНЕНИЯ
 # ==============================================================================
 main() {
-    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"`
+    echo -e "${BLUE}=== Установка Infuse Media Server ===${NC}"
     check_requirements
     fetch_repository
     configure_env
