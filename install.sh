@@ -112,7 +112,7 @@ configure_env() {
             # Если .env не пересоздаётся, всё равно нужно сгенерировать конфиги Nginx для обновления
             log_info "Обновление ключей доступа для TorrServer..."
             docker run --rm httpd:alpine htpasswd -bn "$WEBDAV_USER" "$WEBDAV_PASSWORD" > "$INSTALL_DIR/.htpasswd"
-            chmod 600 "$INSTALL_DIR/.htpasswd"
+            chmod 644 "$INSTALL_DIR/.htpasswd"
 
             cat > "$INSTALL_DIR/nginx.conf" << 'EOF'
 server {
