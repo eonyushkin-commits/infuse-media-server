@@ -1,4 +1,4 @@
-# 🎬 TorrServer to Infuse Media Bridge
+# 🎬 TorrServer to Infuse Bridge
 
 Автоматизированный `.strm` + WebDAV мост между **TorrServer** и плеером **Infuse** (Apple TV, iOS, Mac) для потокового воспроизведения торрентов без предварительного скачивания файлов на диск.
 
