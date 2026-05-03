@@ -1,5 +1,6 @@
 FROM python:3.11-alpine
-RUN pip install --no-cache-dir requests
 WORKDIR /app
-COPY torr_to_strm.py /app/
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY torr_to_strm.py .
 CMD ["python", "-u", "torr_to_strm.py"]
