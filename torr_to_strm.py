@@ -144,17 +144,24 @@ def main():
             strm_filepath = os.path.join(OUTPUT_DIR, f"{clean_title(filename)}.{t_hash[:8]}.strm")
 
             try:
-                with open(strm_filepath, 'x', encoding='utf-8') as f:
+                if os.path.exists(strm_filepath):
+                    with open(strm_filepath, 'r', encoding='utf-8') as f:
+                        if f.read() == stream_url:
+                            continue
+                    action_msg = "🔄 Обновлён"
+                else:
+                    action_msg = "🎬 Создан"
+
+                tmp_filepath = f"{strm_filepath}.tmp"
+                with open(tmp_filepath, 'w', encoding='utf-8') as f:
                     f.write(stream_url)
-                print(f"🎬 Создан: {strm_filepath}")
-            except FileExistsError:
-                with open(strm_filepath, 'r', encoding='utf-8') as f:
-                    existing_url = f.read()
-                if existing_url != stream_url:
-                    with open(strm_filepath, 'w', encoding='utf-8') as f:
-                        f.write(stream_url)
-                    print(f"🔄 Обновлён: {strm_filepath}")
+                
+                os.replace(tmp_filepath, strm_filepath)
+                print(f"{action_msg}: {strm_filepath}")
+
             except Exception as e:
+                if 'tmp_filepath' in locals() and os.path.exists(tmp_filepath):
+                    os.remove(tmp_filepath)
                 print(f"⚠️ Ошибка записи файла {strm_filepath}: {e}")
 
     for file in os.listdir(OUTPUT_DIR):
